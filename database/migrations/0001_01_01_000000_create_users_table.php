@@ -11,32 +11,6 @@ return new class extends Migration
      */
     public function up(): void
     {
-        Schema::create('roles', function (Blueprint $table) {
-            $table->id();
-            $table->string('uid')->unique();
-            $table->string('name');
-            $table->string('slug')->unique();
-        });
-
-        Schema::create('permissions', function (Blueprint $table) {
-            $table->id();
-            $table->string('uid')->unique();
-            $table->string('name');
-            $table->string('slug')->unique();
-            $table->timestamps();
-        });
-
-        Schema::create('menus', function (Blueprint $table) {
-            $table->id();
-            $table->string('uid')->unique();
-            $table->string('name');
-            $table->string('icon')->nullable();
-            $table->string('url')->nullable();
-            $table->string('parent_uid')->nullable(); // for dropdown/submenus
-            $table->integer('order')->default(0);
-            $table->timestamps();
-        });
-
         Schema::create('users', function (Blueprint $table) {
             $table->id();
             $table->string('uid')->unique();

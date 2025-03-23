@@ -24,6 +24,19 @@ return new class extends Migration
 
             $table->timestamps();
         });
+
+        Schema::create('users_tenant', function (Blueprint $table) {
+            $table->id();
+            $table->string('uid')->unique();
+            $table->string('user_uid');
+            $table->string('tenant_uid');
+
+
+            $table->foreign('user_uid')->references('uid')->on('users');
+            $table->foreign('tenant_uid')->references('uid')->on('tenants');
+
+            $table->timestamps();
+        });
     }
 
     /**
