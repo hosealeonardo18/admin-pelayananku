@@ -1,66 +1,284 @@
-<p align="center"><a href="https://laravel.com" target="_blank"><img src="https://raw.githubusercontent.com/laravel/art/master/logo-lockup/5%20SVG/2%20CMYK/1%20Full%20Color/laravel-logolockup-cmyk-red.svg" width="400" alt="Laravel Logo"></a></p>
+# ✨ REKAP FITUR & STRUKTUR SISTEM MULTI-TENANT LARAVEL (DENGAN KODE IMPLEMENTASI & MIGRASI LENGKAP)
 
-<p align="center">
-<a href="https://github.com/laravel/framework/actions"><img src="https://github.com/laravel/framework/workflows/tests/badge.svg" alt="Build Status"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/dt/laravel/framework" alt="Total Downloads"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/v/laravel/framework" alt="Latest Stable Version"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/l/laravel/framework" alt="License"></a>
-</p>
+## 🌐 TUJUAN UTAMA
 
-## About Laravel
+-   Multi-tenant: 1 user bisa akses banyak perusahaan
+-   Multi-role per tenant (akses bervariasi per tenant)
+-   DB terpisah untuk setiap tenant
+-   Central DB untuk kontrol pusat (roles, permissions, monitoring)
 
-Laravel is a web application framework with expressive, elegant syntax. We believe development must be an enjoyable and creative experience to be truly fulfilling. Laravel takes the pain out of development by easing common tasks used in many web projects, such as:
+---
 
-- [Simple, fast routing engine](https://laravel.com/docs/routing).
-- [Powerful dependency injection container](https://laravel.com/docs/container).
-- Multiple back-ends for [session](https://laravel.com/docs/session) and [cache](https://laravel.com/docs/cache) storage.
-- Expressive, intuitive [database ORM](https://laravel.com/docs/eloquent).
-- Database agnostic [schema migrations](https://laravel.com/docs/migrations).
-- [Robust background job processing](https://laravel.com/docs/queues).
-- [Real-time event broadcasting](https://laravel.com/docs/broadcasting).
+## ⚙️ KONFIGURASI DASAR
 
-Laravel is accessible, powerful, and provides tools required for large, robust applications.
+### 1. `.env`
 
-## Learning Laravel
+```env
+DB_CONNECTION=mysql
+DB_HOST=127.0.0.1
+DB_DATABASE=central_db
+DB_USERNAME=root
+DB_PASSWORD=
+QUEUE_CONNECTION=database
+BROADCAST_DRIVER=pusher
+```
 
-Laravel has the most extensive and thorough [documentation](https://laravel.com/docs) and video tutorial library of all modern web application frameworks, making it a breeze to get started with the framework.
+### 2. `config/database.php`
 
-You may also try the [Laravel Bootcamp](https://bootcamp.laravel.com), where you will be guided through building a modern Laravel application from scratch.
+```php
+'mysql' => [ // default central db
+  ...
+],
 
-If you don't feel like reading, [Laracasts](https://laracasts.com) can help. Laracasts contains thousands of video tutorials on a range of topics including Laravel, modern PHP, unit testing, and JavaScript. Boost your skills by digging into our comprehensive video library.
+'central' => [ // optional alias
+  'driver' => 'mysql',
+  'host' => env('DB_HOST', '127.0.0.1'),
+  'database' => env('DB_DATABASE', 'central_db'),
+  'username' => env('DB_USERNAME', 'root'),
+  'password' => env('DB_PASSWORD', ''),
+  'charset' => 'utf8mb4',
+  'collation' => 'utf8mb4_unicode_ci',
+],
 
-## Laravel Sponsors
+'tenant' => [
+  'driver' => 'mysql',
+  'host' => env('DB_HOST', '127.0.0.1'),
+  'database' => '', // akan diset dinamis
+  'username' => env('DB_USERNAME', 'root'),
+  'password' => env('DB_PASSWORD', ''),
+  'charset' => 'utf8mb4',
+  'collation' => 'utf8mb4_unicode_ci',
+],
+```
 
-We would like to extend our thanks to the following sponsors for funding Laravel development. If you are interested in becoming a sponsor, please visit the [Laravel Partners program](https://partners.laravel.com).
+### 3. Middleware Switch DB
 
-### Premium Partners
+```php
+public function handle($request, Closure $next)
+{
+    $company = auth()->user()->currentCompany;
+    Config::set('database.connections.tenant.database', $company->database_name);
+    DB::purge('tenant');
+    DB::reconnect('tenant');
+    return $next($request);
+}
+```
 
-- **[Vehikl](https://vehikl.com/)**
-- **[Tighten Co.](https://tighten.co)**
-- **[WebReinvent](https://webreinvent.com/)**
-- **[Kirschbaum Development Group](https://kirschbaumdevelopment.com)**
-- **[64 Robots](https://64robots.com)**
-- **[Curotec](https://www.curotec.com/services/technologies/laravel/)**
-- **[Cyber-Duck](https://cyber-duck.co.uk)**
-- **[DevSquad](https://devsquad.com/hire-laravel-developers)**
-- **[Jump24](https://jump24.co.uk)**
-- **[Redberry](https://redberry.international/laravel/)**
-- **[Active Logic](https://activelogic.com)**
-- **[byte5](https://byte5.de)**
-- **[OP.GG](https://op.gg)**
+---
 
-## Contributing
+## 🔐 AUTH & PERMISSION (PER TENANT & CENTRAL)
 
-Thank you for considering contributing to the Laravel framework! The contribution guide can be found in the [Laravel documentation](https://laravel.com/docs/contributions).
+### 1. Models
 
-## Code of Conduct
+#### `Role`, `Permission`, `Menu`
 
-In order to ensure that the Laravel community is welcoming to all, please review and abide by the [Code of Conduct](https://laravel.com/docs/contributions#code-of-conduct).
+```php
+class Role extends Model {
+    protected $fillable = ['name', 'slug'];
+    public function permissions() {
+        return $this->belongsToMany(Permission::class);
+    }
+    public function menus() {
+        return $this->belongsToMany(Menu::class);
+    }
+}
+```
 
-## Security Vulnerabilities
+#### User Model
 
-If you discover a security vulnerability within Laravel, please send an e-mail to Taylor Otwell via [taylor@laravel.com](mailto:taylor@laravel.com). All security vulnerabilities will be promptly addressed.
+```php
+class User extends Authenticatable {
+    public function roles() {
+      return $this->belongsToMany(Role::class);
+    }
+    public function permissions() {
+      return $this->belongsToMany(Permission::class);
+    }
+    public function hasPermission($slug) {
+      if ($this->permissions()->where('slug', $slug)->exists()) return true;
+      foreach ($this->roles as $role) {
+        if ($role->permissions()->where('slug', $slug)->exists()) return true;
+      }
+      return false;
+    }
+    public function hasRole($slug) {
+      return $this->roles()->where('slug', $slug)->exists();
+    }
+}
+```
 
-## License
+### 2. Middleware
 
-The Laravel framework is open-sourced software licensed under the [MIT license](https://opensource.org/licenses/MIT).
+```php
+public function handle($request, Closure $next, $permission)
+{
+  if (!auth()->user()->hasPermission($permission)) {
+    abort(403);
+  }
+  return $next($request);
+}
+```
+
+### 3. Blade Directive
+
+```php
+Blade::if('canAccess', fn($slug) => auth()->user()?->hasPermission($slug));
+```
+
+---
+
+## 📁 MIGRASI DATABASE (TENANT)
+
+### users
+
+```php
+Schema::create('users', function (Blueprint $table) {
+    $table->id();
+    $table->string('name');
+    $table->string('email')->unique();
+    $table->string('password');
+    $table->rememberToken();
+    $table->timestamps();
+});
+```
+
+### roles
+
+```php
+Schema::create('roles', function (Blueprint $table) {
+    $table->id();
+    $table->string('name');
+    $table->string('slug')->unique();
+    $table->timestamps();
+});
+```
+
+### permissions
+
+```php
+Schema::create('permissions', function (Blueprint $table) {
+    $table->id();
+    $table->string('name');
+    $table->string('slug')->unique();
+    $table->timestamps();
+});
+```
+
+### menus
+
+```php
+Schema::create('menus', function (Blueprint $table) {
+    $table->id();
+    $table->string('name');
+    $table->string('url')->nullable();
+    $table->string('icon')->nullable();
+    $table->unsignedBigInteger('parent_id')->nullable();
+    $table->integer('order')->default(0);
+    $table->timestamps();
+});
+```
+
+### Pivot Tables
+
+```php
+Schema::create('role_user', function (Blueprint $table) {
+    $table->id();
+    $table->unsignedBigInteger('user_id');
+    $table->unsignedBigInteger('role_id');
+});
+
+Schema::create('permission_role', function (Blueprint $table) {
+    $table->id();
+    $table->unsignedBigInteger('role_id');
+    $table->unsignedBigInteger('permission_id');
+});
+
+Schema::create('permission_user', function (Blueprint $table) {
+    $table->id();
+    $table->unsignedBigInteger('user_id');
+    $table->unsignedBigInteger('permission_id');
+});
+
+Schema::create('menu_role', function (Blueprint $table) {
+    $table->id();
+    $table->unsignedBigInteger('menu_id');
+    $table->unsignedBigInteger('role_id');
+});
+
+Schema::create('menu_permission', function (Blueprint $table) {
+    $table->id();
+    $table->unsignedBigInteger('menu_id');
+    $table->unsignedBigInteger('permission_id');
+});
+
+Schema::create('menu_user', function (Blueprint $table) {
+    $table->id();
+    $table->unsignedBigInteger('menu_id');
+    $table->unsignedBigInteger('user_id');
+});
+```
+
+### Tabel Modul Lain
+
+-   `employees`
+-   `payrolls` (status, approved_by, approved_at, approval_note)
+-   `attendances` (lat, lng, photo, type)
+-   `shifts`, `leaves`
+-   `audit_logs`
+
+---
+
+## 📁 MIGRASI DATABASE (CENTRAL)
+
+-   Sama seperti tenant, hanya beda prefix:
+    -   `central_users`, `central_roles`, `central_permissions`, `central_menus`
+    -   `central_user_role`, `central_permission_user`, dll
+
+---
+
+## 🗂️ STRUKTUR FOLDER SEEDER YANG DIREKOMENDASIKAN
+
+### Tenant
+
+```
+database/seeders/Tenants/
+├── RolePermissionMenuSeeder.php
+├── PayrollDemoSeeder.php
+└── ShiftSeeder.php
+```
+
+### Central
+
+```
+database/seeders/Central/
+├── CentralUserSeeder.php
+├── CentralRoleSeeder.php
+├── CentralPermissionSeeder.php
+└── CentralMenuSeeder.php
+```
+
+Run:
+
+```bash
+php artisan db:seed --class=Tenants\RolePermissionMenuSeeder
+php artisan db:seed --class=Central\CentralRoleSeeder
+```
+
+---
+
+## 📦 MODUL-MODUL YANG DIIMPLEMENTASIKAN
+
+-   Absensi, Cuti, Payroll, Shift, Audit, Import/Export, Upload File
+-   Dashboard & Monitoring Global
+
+---
+
+## 📌 FIXED RULES (Sesuai Permintaan)
+
+-   Approval slip gaji & cuti hanya di tenant
+-   Tidak ada notifikasi tenant ke pusat
+-   Sidebar dan permission sepenuhnya dari DB
+
+---
+
+Sistem sudah siap untuk digunakan skala besar 🚀
